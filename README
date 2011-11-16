@@ -1,0 +1,5 @@
+This is a toy project to re-implement MBL's sequencing pipeline and well-tested
+QA/QC procedures from scratch in Python programming language.
+
+Since this is something we are going to be working on as a side effort, probably
+it will take some time to get to a point where people can start using it.
