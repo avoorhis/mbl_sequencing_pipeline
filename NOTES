@@ -1,0 +1,23 @@
+This is the file where we take little notes.
+
+* {forward,backward}_stop_sequences file format in the config file:
+
+          -----8<-----8<-----8<-----8<-----8<-----8<-----
+          start 200
+          freedom 50
+          length 13
+          GTAGCGGTGAAAT
+          GTAGAGGTGAAAT
+          GTAGCAGTGAAAT
+          GTAGCGGTGGAAT
+          GTAGCGGTAAAAT
+          GGAGCGGTGAAAT
+          GTAGGGGTAAAAT
+          GTAGTGGTGAAAT
+          GTAGGGGTGAAAT
+          (...)
+          -----8<-----8<-----8<-----8<-----8<-----8<-----
+
+explain what those things are. more information about start and freedom is here: `https://github.com/meren/454-anchor-trimming/blob/master/anchortrimming.py`
+
+* anther note here.
