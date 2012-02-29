@@ -20,4 +20,9 @@ class Sample:
         self.lane = None
         self.direction = None # enum('B','F','F RC','R')
         self.adaptor = None # enum('A','B')
+        self.dna_region = None
+        self.taxonomic_domain = None
+        self.project = None
+        self.dataset = None
+        
 

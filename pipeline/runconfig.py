@@ -8,6 +8,8 @@
 # Please read the COPYING file.
 #
 
+from pipeline.sample import Sample
+
 class RunConfig:
     """Doc string here."""
     def __init__(self, config_file_path = None):
@@ -37,18 +39,45 @@ class RunConfig:
         self.platform   = G('platform')
         self.input_dir  = G('input_dir')
         self.output_dir = G('output_dir')
-        self.sff_files  = [sff.strip() for sff in G('sff_files').split(',')]
 
-        # populate sample information for every run_key
+        self.input_files  = [file.strip() for file in G('input_files').split(',')]
+        self.input_file_type = G('input_file_type')
+ 
+        # populate sample information for every run_key
         for run_key in [s for s in user_config.sections() if s != 'general']:
+            #print run_key    # looks like:  1:ACACT
             S = lambda v: user_config.get(run_key, v)
             sample = Sample(run_key)
-            sample.forward_primer = S('forward_primer')
-            sample.distal_primer = S('distal_primer')
+            
+            # has defaults -not required
+            try:
+                sample.proximal_primers = S('forward_primers').strip("'").strip('"').split(',')
+            except:
+                sample.proximal_primers = []
+            try:
+                sample.distal_primers = S('reverse_primers').strip("'").strip('"').split(',')
+            except:
+                sample.distal_primers = []
+            try:
+                sample.stop_sequences = S('stop_sequences').strip("'").strip('"').split(',')
+            except:
+                sample.stop_sequences = []
+            try:
+                sample.anchor = S('anchor')
+            except:
+                sample.anchor = ''
+            # required
             sample.direction = S('direction')
-            # (...)
-
-            self.run_keys.append(run_key)
-            self.samples[run_key] = sample
+            sample.project = S('project_name')
+            sample.dataset = S('dataset_name')
+            sample.dna_region = S('dna_region')
+            sample.taxonomic_domain = S('taxonomic_domain')
+            
+            # a list of run_keys
+            # convert: change ':' to '_'
+            key = run_key[:1]+'_'+run_key[2:]
+            self.run_keys.append(key)
+            # a dictionary of samples
+            self.samples[key] = sample
 
 

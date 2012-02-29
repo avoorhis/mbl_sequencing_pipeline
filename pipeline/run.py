@@ -9,6 +9,7 @@
 #
 # Please read the COPYING file.
 #
+from pipeline.runconfig import RunConfig
 
 class Run(RunConfig):
     def __init__(self, config_file_path = None):
