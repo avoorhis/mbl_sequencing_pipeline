@@ -1,4 +1,6 @@
-#!/usr/bin/env python
+#!/usr/local/www/vamps/software/python/bin/python
+
+##!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
 # Copyright (C) 2011, Marine Biological Laboratory
@@ -11,19 +13,340 @@
 # Please read the COPYING file.
 #
 
-from pipeline.run import Run
+import os
+from stat import * # ST_SIZE etc
+import sys
+import shutil
+import types
+from time import sleep
+from pipeline.utils import *
 from pipeline.sample import Sample
 from pipeline.runconfig import RunConfig
+from pipeline.run import Run
+from pipeline.trim_run import TrimRun
+from pipeline.chimera import Chimera
+from pipeline.gast import Gast
+from pipeline.vamps import Vamps
+from pipeline.fasta_mbl_pipeline import MBLPipelineFastaUtils
 
+# pycogent
+import cogent
+
+
+
+#from pipeline.fastalib import FastaOutput,ReadFasta,SequenceSource
+#from pipeline.anchortrimming import *
+
+
+import pipeline.constants as C
+
+    
+        
 if __name__ == '__main__':
     import argparse
+    QUIET   = False
+    VERBOSE = False
 
-    parser = argparse.ArgumentParser(description='Sequence Pipeline')
+    if VERBOSE: print'Verbose:',VERBOSE
+    if VERBOSE: print 'Quiet:',QUIET
+
+    go_trim    = False
+    trimming_done   = False
+    trim_codes = ['']
+    # if set_chimera is true then trimming must be finished
+    go_chimera     = False
+    chimera_done    = False
+    # if set_gasting is True then chemera checking must be finished
+    go_gast     = False
+    gasting_done = False
+    # if set_vamps_upload is True then gasting must be finished
+    go_vamps = False
+    vamps_done = False
+    new_lane_keys =[]
+    
+    
+    
+    usage = "usage: %prog [options] arg1 arg2"
+    parser = argparse.ArgumentParser(description='MBL Sequence Pipeline')
     parser.add_argument('-c', '--configuration', required=True, metavar = 'CONFIG_FILE', 
-                                                 help = 'Configuration parameters of the run')
+                                                 help = 'Configuration parameters of the run. See README File')
+                                                 
+    parser.add_argument("-trim", "--trimming",     required=False,  action="store_true",   dest = "go_trim", 
+                                                help="Step 1: run trimming part of pipeline")
+                                                
+    parser.add_argument("-chim", "--chimera",  required=False,  action="store_true",   dest = "go_chimera", 
+                                                help="Step 2: run chimera checker")          
+                                                
+    parser.add_argument("-gast", "--gasting",     required=False,  action="store_true",   dest = "go_gast", 
+                                                help="Step 3: run gasting part of pipeline")
+                                                
+    parser.add_argument("-vamps", "--vamps",    required=False,  action="store_true",   dest = "go_vamps", 
+                                                help="Step 4: run vamps upload part of pipeline") 
+                                                
+    parser.add_argument('-a', '--all',      required=False,   action="store_true",   dest = "go_all",        
+                                                 help = 'Run Trimming, Chimera Checker, Gasting and VAMPS Upload sequentially') 
+#   parser.add_argument('-start', '--start',required=False,  dest = "start_where", default=start_where, choices=['chimera','gast','vamps'],     
+#                                                help = 'Start at this process: chimera, gast, or vamps') 
+#   parser.add_argument('-stop',  '--stop', required=False,   dest = "stop_where", default=stop_where,   choices=['trim','chimera','gast'],      
+#                                                help = 'Stop after this process: trim, chimera, or gast') 
+    
+    parser.add_argument('-v', '--verbose',  required=False,   action="store_true",   dest = "VERBOSE",        
+                                                 help = 'Turns on chatty output')                                                 
+    parser.add_argument("-q", "--quiet",    required=False, action="store_true",   dest="QUIET", 
+                                                 help="don't print any status messages to stdout")
 
     args = parser.parse_args()
+    VERBOSE = args.VERBOSE
+    QUIET = args.QUIET
+    
+    # where to sart and stop:
+    go_trim     = args.go_trim
+    go_chimera  = args.go_chimera
+    go_gast     = args.go_gast
+    go_vamps    = args.go_vamps
+    go_all      = args.go_all
+    
+    if not go_all and not go_trim and not go_chimera and not go_gast and not go_vamps:
+        print "\nBypass this menu by adding your choices to the command line"
+        print "  -trim, -chim, -gast, -vamps or -a (for all)"
+        print "1  trim only"
+        print "2  trim and chimera check"
+        print "3  trim,chmeras and gast"
+        print "4  chimera check only"
+        print "5  chimeras and gast"
+        print "6  chimeras, gast and vamps upload"
+        print "7  gast only"
+        print "8  gast and vamps upload"
+        print "9  vamps upload only"
+        print "10 all"
+        print "ctl-C to exit"
+        choice = input("\nEnter your choice: ")
+        (go_trim,go_chimera,go_gast,go_vamps) = options[choice]()
+        print "Choice: ",choice
+    if VERBOSE:
+        print "Settings"
+        print 'Trim',go_trim
+        print 'Chimera',go_chimera
+        print 'GAST',go_gast
+        print 'VAMPS',go_vamps
 
+ 
+        
     run = Run(args.configuration)
+    
+    
+    rundate = run.run_date
+    # create output directory:
+    outputdir = rundate
+    status_file = outputdir+'/status'
+    if not os.path.exists(outputdir):
+        print "Creating directory: "+outputdir
+        os.makedirs(outputdir)      
+        status_file_h = open(status_file,"a")
+    elif(go_trim):
+        print "Removing and recreating directory: "+outputdir
+        shutil.rmtree(outputdir)        
+        os.makedirs(outputdir)
+        status_file_h = open(status_file,"a")
+        status_file_h.write("TRIM STARTING\n")
+        if VERBOSE: print "Output directory exists: overwriting"
+    else:
+        print "Keeping directory: "+outputdir
+        # reading and writing 'r+'
+        status_file_h = open(status_file,"r+")
+        print "found status file",status_file
+        for line in status_file_h.readlines():
+            line = line.strip()
+            if line.split('=')[0] == 'new_lane_keys':
+                new_lane_keys = line.split('=')[1].split(',')
+                #print 'new_lane_keys',new_lane_keys
+                if type(new_lane_keys) is not types.ListType:
+                    status_file_h.write("READ ERROR: No lane_keys found\n")
+                    print "READ ERROR: No lane_keys found\n"
+                    sys.exit()
+    
+    ####################################################################
+    #
+    #  1) Start Trimming
+    # The RunTrim class should look for keys and primers
+    # and trim the sequences if found.
+    # Output should be (one for each lane_key):
+    #   Fasta file: trimmed sequences
+    #          names: 
+    #   Fasta file: unique trimmed sequences
+    #   Names file: 2 cols: 1st = id of unique, 
+    #                       2nd = list of others it represents (include 1st),csl
+    #   Text file:  list of deleted read_ids and reasons
+    ####################################################################
+    
+    if go_trim:
+        
+        mytrim = TrimRun(run, outputdir, args)
+        
+        # pass True to write out the straight fasta file of all trimmed non-deleted seqs
+        # Remember: this is before chimera checking
+        trim_codes = mytrim.trimrun(True)
+        
+       
+       
+        if trim_codes[0] == 'SUCCESS':
+            new_lane_keys = trim_codes[2]
+            if not QUIET: print "Trimming finished successfully"
+            status_file_h.write("TRIM SUCCESS\n")
+            status_file_h.write("new_lane_keys="+','.join(new_lane_keys)+"\n")
+            
+            # write_data_files: names, unique and abund files
+            mytrim.write_data_files(new_lane_keys)
+            
+            
+        else:
+            if not QUIET: print "Trimming Failed"
+            status_file_h.write("TRIM ERROR: "+trim_codes[1]+" "+trim_codes[2]+"\n")
+            sys.exit()
+            
+        
+        
+    if not go_chimera and not go_gast and not go_vamps:
+        if not QUIET: print "Exiting after Trimming per your request."
+        sys.exit()
+    
+    ###################################################################
+    #
+    #  2 chimera check
+    #
+    ###################################################################
+    if  ( go_chimera and trim_codes[0] == 'SUCCESS') or (go_chimera and not go_trim):
+    #if  trim_codes[0] == 'SUCCESS' and  go_chimera:
+        
+        
+            
+        chimera_cluster_ids = []
+ 
+        if VERBOSE: print "Starting Chimera Checker"
+        mychimera = Chimera(run, outputdir, args)
+        
+        c_den    = mychimera.chimera_denovo(new_lane_keys)
+        if c_den[0] == 'SUCCESS':
+            chimera_cluster_ids += c_den[2]
+            chimera_code='PASS'
+        elif c_den[0] == 'NOREGION':
+            chimera_code='NOREGION'
+        elif c_den[0] == 'FAIL':
+            chimera_code = 'FAIL'
+        else:
+            chimera_code='FAIL'
+        
+        c_ref    = mychimera.chimera_reference(new_lane_keys)
+        
+        if c_ref[0] == 'SUCCESS':
+            chimera_cluster_ids += c_ref[2]
+            chimera_code='PASS'
+        elif c_ref[0] == 'NOREGION':
+            chimera_code = 'NOREGION'
+        elif c_ref[0] == 'FAIL':
+            chimera_code='FAIL'
+        else:
+            chimera_code='FAIL'
+        
+        #print chimera_cluster_ids
+        
+        if chimera_code == 'PASS':  
+            
+            chimera_cluster_code = wait_for_cluster_to_finish(chimera_cluster_ids,args) 
+            if chimera_cluster_code[0] == 'SUCCESS':
+                if not QUIET: print "Chimera checking finished successfully"
+                status_file_h.write("CHIMERA SUCCESS\n")
+                
+                
+            else:
+                if not QUIET: print "Chimera checking Failed"
+                status_file_h.write("CHIMERA ERROR: "+str(chimera_cluster_code[1])+" "+str(chimera_cluster_code[2])+"\n")
+                sys.exit()
+                
+        elif chimera_code == 'NOREGION':
+            if not QUIET: print "No regions found that need chimera checking"
+            status_file_h.write("CHIMERA CHECK NOT NEEDED\n")
+            
+        elif chimera_code == 'FAIL':
+            if not QUIET: print "Chimera checking Failed"
+            status_file_h.write("CHIMERA ERROR: \n")
+            sys.exit()
+        else:
+            if not QUIET: print "Chimera checking Failed"
+            status_file_h.write("CHIMERA ERROR: \n")
+            sys.exit()
+    sleep(2)   
+    if  go_chimera and chimera_code == 'PASS' and  chimera_cluster_code[0] == 'SUCCESS':
+        mychimera.write_chimeras_to_deleted_file(new_lane_keys)
+        # should also recreate fasta
+        # then read chimera files and place (or replace) any chimeric read_id
+        # into the deleted file.
+        
+        mymblutils = MBLPipelineFastaUtils(outputdir=outputdir,lane_keys=new_lane_keys)
+        
+        # write new cleaned files that remove chimera if apropriate
+        # these are in fasta_mbl_pipeline.py
+        # the cleaned file are renamed to the original name:
+        # lane_key.unique.fa
+        # lane_key.trimmed.fa
+        # lane_key.names        -- 
+        # lane_key.abund.fa     -- this file is for the uclust chimera script
+        # lane_key.deleted.txt  -- no change in this file
+        # THE ORDER IS IMPORTANT HERE:
+        mymblutils.write_clean_fasta_file()
+        mymblutils.write_clean_names_file()
+        mymblutils.write_clean_uniques_file()
+        mymblutils.write_clean_abundance_file()
+        # write keys file for each lane_key - same fields as db table? for easy writing
+        # write primers file for each lane_key
+ 
+        
+        # Write new clean files to the database
+        # rawseq table not used
+        # trimseq
+        # runkeys
+        # primers
+        # run primers
+        mymblutils.write_clean_files_to_database()
+        
+    if not go_gast and not go_vamps:
+        if not QUIET: print "Exiting after Chimera Check per your request."
+        sys.exit()
+     
+    ###################################################################
+    #        
+    # 3 GAST Process
+    #
+    ###################################################################
+    if go_gast:  
+        mygast = Gast(run, outputdir, args)
+        mygast.clustergast(new_lane_keys)
+        mygast.gast_cleanup(new_lane_keys)
+        mygast.gast2tax(new_lane_keys)
+        
+    if not go_vamps:
+        if not QUIET: print "Exiting after GASTing per your request."
+        sys.exit()
+        
+    ###################################################################
+    #
+    # 4 VAMPS Upload
+    #
+    ###################################################################        
+    if go_vamps:  
+        myvamps = Vamps(run, outputdir, args)
+        myvamps.info(new_lane_keys)
+        myvamps.projects(new_lane_keys)
+        myvamps.taxonomy(new_lane_keys)
+        myvamps.sequences(new_lane_keys)        
+        myvamps.exports(new_lane_keys)
+       
+    
+    
 
-    # do something with 'run'.
+    
+    
+    status_file_h.close()
+    
+    
+    
